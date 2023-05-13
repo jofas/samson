@@ -1,16 +1,36 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use reqwest::Client;
 
-use futures::stream::{FuturesOrdered, StreamExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 
 use chrono::offset::Utc;
 use chrono::DateTime;
 
 use tracing::{error, info};
 
+use tokio::time::sleep;
+
+use regex::Regex;
+
+use once_cell::sync::Lazy;
+
 use std::fs::File;
-use std::io::{Error as IoError, Write};
+use std::io::{self, Write};
+use std::num::ParseIntError;
+use std::time::Duration;
+
+static WAIT_SECONDS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"Please retry again in (?P<s>\d{1,2}) seconds").unwrap());
+
+macro_rules! log_error {
+    ($msg:literal) => {
+        |e| {
+            error!("{}: {e:?}", $msg);
+            e
+        }
+    };
+}
 
 #[derive(Debug, Deserialize)]
 struct LatestTopics {
@@ -52,24 +72,49 @@ struct Question {
     username: String,
 }
 
-async fn scrape(url: &str) -> Result<Vec<Question>, Error> {
+async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error> {
+    loop {
+        let response = client.get(url).send().await?;
+
+        let status = response.status();
+
+        let body = response.text().await?;
+
+        if status.as_u16() == 429 {
+            let seconds: u64 = WAIT_SECONDS
+                .captures(&body)
+                .ok_or(Error::None)
+                .map_err(log_error!("no capture found"))?
+                .name("s")
+                .ok_or(Error::None)
+                .map_err(log_error!("no capture name `s` found"))?
+                .as_str()
+                .parse()?;
+
+            info!("sleeping for {seconds} seconds");
+
+            sleep(Duration::from_secs(seconds)).await;
+
+            continue;
+        }
+
+        return Ok(serde_json::from_str(&body)?);
+    }
+}
+
+async fn scrape(name: &str, url: &str) -> Result<(), Error> {
     let client = Client::new();
 
-    let mut questions: Vec<Question> = Vec::new();
     let mut page = 0;
 
     loop {
-        let latest_topics = client
-            .get(format!("{url}/latest.json?order=created&page={page}"))
-            .send()
-            .await?
-            .text()
-            .await?;
+        let mut questions: Vec<Question> = Vec::with_capacity(30);
 
-        let latest_topics: LatestTopics = serde_json::from_str(&latest_topics).map_err(|e| {
-            error!(latest_topics);
-            e
-        })?;
+        let latest_topics: LatestTopics = get(
+            &client,
+            &format!("{url}/latest.json?order=created&page={page}"),
+        )
+        .await?;
 
         let topics = latest_topics.topic_list.topics;
 
@@ -80,47 +125,38 @@ async fn scrape(url: &str) -> Result<Vec<Question>, Error> {
         for (i, topic) in topics.into_iter().enumerate() {
             info!(forum = url, page = page, topic = i);
 
-            let topic = client
-                .get(format!("{}/t/{}.json", url, topic.id))
-                .send()
-                .await?
-                .text()
-                .await?;
+            let topic: Topic = get(&client, &format!("{}/t/{}.json", url, topic.id)).await?;
 
-            let topic: Topic = serde_json::from_str(&topic).map_err(|e| {
-                error!(topic);
-                e
-            })?;
+            let post_id = topic
+                .post_stream
+                .ok_or(Error::None)
+                .map_err(log_error!("`post_stream` empty"))?
+                .posts[0]
+                .id;
 
-            let post_id = topic.post_stream.ok_or(Error::None)?.posts[0].id;
-
-            let post = client
-                .get(format!("{url}/posts/{post_id}.json"))
-                .send()
-                .await?
-                .text()
-                .await?;
-
-            let post: Post = serde_json::from_str(&post).map_err(|e| {
-                error!(post);
-                e
-            })?;
+            let post: Post = get(&client, &format!("{url}/posts/{post_id}.json")).await?;
 
             let q = Question {
                 title: topic.title,
                 created: topic.created_at,
                 username: post.username,
                 body_cooked: post.cooked,
-                body_raw: post.raw.ok_or(Error::None)?,
+                body_raw: post
+                    .raw
+                    .ok_or(Error::None)
+                    .map_err(log_error!("`post.raw` field empty"))?,
             };
 
             questions.push(q);
         }
 
+        let res = serde_json::to_vec_pretty(&questions)?;
+        File::create(format!("{name}-{page}.json"))?.write_all(&res)?;
+
         page += 1;
     }
 
-    Ok(questions)
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -128,7 +164,8 @@ enum Error {
     None,
     Reqwest(reqwest::Error),
     Json(serde_json::Error),
-    IO(IoError),
+    IO(io::Error),
+    ParseIntError(ParseIntError),
 }
 
 impl From<reqwest::Error> for Error {
@@ -143,9 +180,15 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<IoError> for Error {
-    fn from(e: IoError) -> Self {
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
         Self::IO(e)
+    }
+}
+
+impl From<ParseIntError> for Error {
+    fn from(e: ParseIntError) -> Self {
+        Self::ParseIntError(e)
     }
 }
 
@@ -156,16 +199,11 @@ async fn main() -> Result<(), Error> {
     let u = "https://users.rust-lang.org";
     let i = "https://internals.rust-lang.org";
 
-    let mut requests = FuturesOrdered::from_iter([scrape(u), scrape(i)]);
+    let mut requests = FuturesUnordered::from_iter([scrape("urlo", u), scrape("irlo", i)]);
 
-    let u = requests.next().await.ok_or(Error::None)??;
-    let i = requests.next().await.ok_or(Error::None)??;
-
-    let u = serde_json::to_string_pretty(&u)?;
-    let i = serde_json::to_string_pretty(&i)?;
-
-    File::create("urlo.json")?.write_all(u.as_bytes())?;
-    File::create("irlo.json")?.write_all(i.as_bytes())?;
+    while let Some(r) = requests.next().await {
+        r?;
+    }
 
     Ok(())
 }
