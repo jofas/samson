@@ -15,7 +15,7 @@ use regex::Regex;
 
 use once_cell::sync::Lazy;
 
-use std::fs::File;
+use std::fs::{create_dir_all, File};
 use std::io::{self, Write};
 use std::num::ParseIntError;
 use std::time::Duration;
@@ -103,6 +103,8 @@ async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error
 }
 
 async fn scrape(name: &str, url: &str) -> Result<(), Error> {
+    create_dir_all("scrape/")?;
+
     let client = Client::new();
 
     let mut page = 0;
@@ -151,7 +153,7 @@ async fn scrape(name: &str, url: &str) -> Result<(), Error> {
         }
 
         let res = serde_json::to_vec_pretty(&questions)?;
-        File::create(format!("{name}-{page}.json"))?.write_all(&res)?;
+        File::create(format!("scrape/{name}-{page}.json"))?.write_all(&res)?;
 
         page += 1;
     }
