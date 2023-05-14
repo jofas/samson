@@ -9,15 +9,18 @@ use chrono::DateTime;
 
 use tracing::{error, info};
 
+use tokio::task::{spawn_blocking, JoinError};
 use tokio::time::sleep;
 
 use regex::Regex;
 
 use once_cell::sync::Lazy;
 
-use std::fs::{create_dir_all, File};
+use std::fmt::Display;
+use std::fs::{create_dir_all, read_to_string, remove_file, File};
 use std::io::{self, Write};
 use std::num::ParseIntError;
+use std::path::Path;
 use std::time::Duration;
 
 static WAIT_SECONDS: Lazy<Regex> =
@@ -102,7 +105,7 @@ async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error
     }
 }
 
-async fn scrape(name: &str, url: &str) -> Result<(), Error> {
+async fn scrape<N: Display + Send + 'static>(name: N, url: &str) -> Result<(), Error> {
     create_dir_all("scrape/")?;
 
     let client = Client::new();
@@ -158,6 +161,55 @@ async fn scrape(name: &str, url: &str) -> Result<(), Error> {
         page += 1;
     }
 
+    spawn_blocking(move || combine_temp_files(name)).await??;
+
+    Ok(())
+}
+
+fn combine_temp_files<N: Display>(name: N) -> Result<(), Error> {
+    let mut page = 0;
+    let mut questions = Vec::new();
+
+    loop {
+        let path = format!("scrape/{name}-{page}.json");
+        let path = Path::new(&path);
+
+        if !path.exists() {
+            break;
+        }
+
+        let file_questions = read_to_string(path)?;
+        let mut file_questions: Vec<Question> = serde_json::from_str(&file_questions)?;
+
+        questions.append(&mut file_questions);
+
+        page += 1;
+    }
+
+    let res = serde_json::to_vec_pretty(&questions)?;
+    File::create(format!("scrape/{name}.json"))?.write_all(&res)?;
+
+    delete_temp_files(name)?;
+
+    Ok(())
+}
+
+fn delete_temp_files<N: Display>(name: N) -> Result<(), Error> {
+    let mut page = 0;
+
+    loop {
+        let path = format!("scrape/{name}-{page}.json");
+        let path = Path::new(&path);
+
+        if !path.exists() {
+            break;
+        }
+
+        remove_file(path)?;
+
+        page += 1;
+    }
+
     Ok(())
 }
 
@@ -168,6 +220,7 @@ enum Error {
     Json(serde_json::Error),
     IO(io::Error),
     ParseIntError(ParseIntError),
+    JoinError(JoinError),
 }
 
 impl From<reqwest::Error> for Error {
@@ -191,6 +244,12 @@ impl From<io::Error> for Error {
 impl From<ParseIntError> for Error {
     fn from(e: ParseIntError) -> Self {
         Self::ParseIntError(e)
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(e: JoinError) -> Self {
+        Self::JoinError(e)
     }
 }
 
