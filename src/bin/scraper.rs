@@ -1,5 +1,7 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use csv::{Reader, Writer};
+
 use reqwest::Client;
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -17,8 +19,8 @@ use regex::Regex;
 use once_cell::sync::Lazy;
 
 use std::fmt::Display;
-use std::fs::{create_dir_all, read_to_string, remove_file, File};
-use std::io::{self, Write};
+use std::fs::{create_dir_all, remove_file};
+use std::io;
 use std::num::ParseIntError;
 use std::path::Path;
 use std::time::Duration;
@@ -105,7 +107,7 @@ async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error
     }
 }
 
-async fn scrape<N: Display + Send + 'static>(name: N, url: &str) -> Result<(), Error> {
+async fn scrape<N: Display + Clone + Send + 'static>(name: N, url: &str) -> Result<(), Error> {
     create_dir_all("scrape/")?;
 
     let client = Client::new();
@@ -155,8 +157,8 @@ async fn scrape<N: Display + Send + 'static>(name: N, url: &str) -> Result<(), E
             questions.push(q);
         }
 
-        let res = serde_json::to_vec_pretty(&questions)?;
-        File::create(format!("scrape/{name}-{page}.json"))?.write_all(&res)?;
+        let name = name.clone();
+        spawn_blocking(move || create_temp_file(name, page, &questions)).await??;
 
         page += 1;
     }
@@ -166,28 +168,44 @@ async fn scrape<N: Display + Send + 'static>(name: N, url: &str) -> Result<(), E
     Ok(())
 }
 
+fn create_temp_file<N: Display>(name: N, page: u64, questions: &[Question]) -> Result<(), Error> {
+    let mut w = Writer::from_path(format!("scrape/{name}-{page}.csv"))?;
+
+    for q in questions {
+        w.serialize(q)?;
+    }
+
+    w.flush()?;
+
+    Ok(())
+}
+
 fn combine_temp_files<N: Display>(name: N) -> Result<(), Error> {
     let mut page = 0;
     let mut questions = Vec::new();
 
     loop {
-        let path = format!("scrape/{name}-{page}.json");
+        let path = format!("scrape/{name}-{page}.csv");
         let path = Path::new(&path);
 
         if !path.exists() {
             break;
         }
 
-        let file_questions = read_to_string(path)?;
-        let mut file_questions: Vec<Question> = serde_json::from_str(&file_questions)?;
-
-        questions.append(&mut file_questions);
+        for question in Reader::from_path(path)?.deserialize() {
+            questions.push(question?);
+        }
 
         page += 1;
     }
 
-    let res = serde_json::to_vec_pretty(&questions)?;
-    File::create(format!("scrape/{name}.json"))?.write_all(&res)?;
+    let mut w = Writer::from_path(format!("scrape/{name}.csv"))?;
+
+    for q in questions {
+        w.serialize(q)?;
+    }
+
+    w.flush()?;
 
     delete_temp_files(name)?;
 
@@ -221,6 +239,7 @@ enum Error {
     IO(io::Error),
     ParseIntError(ParseIntError),
     JoinError(JoinError),
+    CsvError(csv::Error),
 }
 
 impl From<reqwest::Error> for Error {
@@ -250,6 +269,12 @@ impl From<ParseIntError> for Error {
 impl From<JoinError> for Error {
     fn from(e: JoinError) -> Self {
         Self::JoinError(e)
+    }
+}
+
+impl From<csv::Error> for Error {
+    fn from(e: csv::Error) -> Self {
+        Self::CsvError(e)
     }
 }
 
