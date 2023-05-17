@@ -1,4 +1,9 @@
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use samson::{Error, Question};
+
+use serde::{de::DeserializeOwned, Deserialize};
+
+use chrono::offset::Utc;
+use chrono::DateTime;
 
 use csv::{Reader, Writer};
 
@@ -6,12 +11,9 @@ use reqwest::Client;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use chrono::offset::Utc;
-use chrono::DateTime;
-
 use tracing::{error, info};
 
-use tokio::task::{spawn_blocking, JoinError};
+use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
 use regex::Regex;
@@ -20,8 +22,6 @@ use once_cell::sync::Lazy;
 
 use std::fmt::Display;
 use std::fs::{create_dir_all, remove_file};
-use std::io;
-use std::num::ParseIntError;
 use std::path::Path;
 use std::time::Duration;
 
@@ -66,15 +66,6 @@ struct Post {
     username: String,
     cooked: String,
     raw: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Question {
-    title: String,
-    body_raw: String,
-    body_cooked: String,
-    created: DateTime<Utc>,
-    username: String,
 }
 
 async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error> {
@@ -231,52 +222,9 @@ fn delete_temp_files<N: Display>(name: N) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug)]
-enum Error {
-    None,
-    Reqwest(reqwest::Error),
-    Json(serde_json::Error),
-    IO(io::Error),
-    ParseIntError(ParseIntError),
-    JoinError(JoinError),
-    CsvError(csv::Error),
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Reqwest(e)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Self::IO(e)
-    }
-}
-
-impl From<ParseIntError> for Error {
-    fn from(e: ParseIntError) -> Self {
-        Self::ParseIntError(e)
-    }
-}
-
-impl From<JoinError> for Error {
-    fn from(e: JoinError) -> Self {
-        Self::JoinError(e)
-    }
-}
-
-impl From<csv::Error> for Error {
-    fn from(e: csv::Error) -> Self {
-        Self::CsvError(e)
-    }
-}
+/// Created in `src/bin/util.rs`
+///
+const SO_FILTER: &str = "!GA6rnU)jp95BuY0.ZNgu2js9EcJVQ";
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
