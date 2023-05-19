@@ -1,10 +1,18 @@
-use samson::Error;
+use crate::error::Error;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use reqwest::Client;
 
 use tracing::{error, info};
+
+/// Created with [`create`].
+///
+/// If there's a need for more fields, update the fields in [`create`],
+/// run the function again and replace this constant with the newly generated
+/// filter.
+///
+pub const FILTER: &str = "!GA6rnU)jp95BuY0.ZNgu2js9EcJVQ";
 
 #[derive(Debug, Serialize)]
 struct CreateFilter {
@@ -56,7 +64,7 @@ enum FilterType {
     Invalid,
 }
 
-async fn create_so_filter() -> Result<(), Error> {
+pub async fn create() -> Result<(), Error> {
     let client = Client::new();
 
     let url = "https://api.stackexchange.com/2.3/filters/create";
@@ -107,15 +115,6 @@ async fn create_so_filter() -> Result<(), Error> {
     } else {
         error!(?status, body);
     }
-
-    Ok(())
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt::init();
-
-    create_so_filter().await?;
 
     Ok(())
 }

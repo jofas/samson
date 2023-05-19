@@ -1,0 +1,73 @@
+use clap::{builder::ValueParser, Parser, Subcommand};
+
+use std::str::FromStr;
+
+mod cmd;
+mod error;
+mod question;
+
+use cmd::scrape::Page;
+use error::Error;
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Scrape {
+        #[arg(value_parser = ValueParser::new(Page::from_str))]
+        pages: Vec<Page>,
+    },
+    Util {
+        #[command(subcommand)]
+        command: UtilCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum UtilCommand {
+    So {
+        #[command(subcommand)]
+        command: SoUtilCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SoUtilCommand {
+    Filter,
+    AccessToken,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt::init();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Scrape { pages } => {
+            cmd::scrape::scrape(pages).await?;
+        }
+        Command::Util {
+            command: UtilCommand::So {
+                command: SoUtilCommand::Filter,
+            },
+        } => {
+            cmd::util::so::filter::create().await?;
+        }
+        Command::Util {
+            command:
+                UtilCommand::So {
+                    command: SoUtilCommand::AccessToken,
+                },
+        } => {
+            todo!();
+        }
+    }
+
+    Ok(())
+}

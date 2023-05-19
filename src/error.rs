@@ -1,21 +1,9 @@
 use tokio::task::JoinError;
 
-use serde::{Deserialize, Serialize};
-
-use chrono::offset::Utc;
-use chrono::DateTime;
-
+use std::error::Error as StdErrorTrait;
+use std::fmt;
 use std::io;
 use std::num::ParseIntError;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Question {
-    pub title: String,
-    pub body_raw: String,
-    pub body_cooked: String,
-    pub created: DateTime<Utc>,
-    pub username: String,
-}
 
 #[derive(Debug)]
 pub enum Error {
@@ -26,7 +14,16 @@ pub enum Error {
     ParseIntError(ParseIntError),
     JoinError(JoinError),
     CsvError(csv::Error),
+    Custom(String),
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl StdErrorTrait for Error {}
 
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
