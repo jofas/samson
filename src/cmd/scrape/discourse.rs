@@ -7,7 +7,7 @@ use csv::{Reader, Writer};
 
 use reqwest::Client;
 
-use tracing::{error, info};
+use tracing::info;
 
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
@@ -20,22 +20,12 @@ use std::fs::remove_file;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::error::Error;
 use crate::question::Question;
 
 use super::Page;
 
 static WAIT_SECONDS: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"Please retry again in (?P<s>\d{1,2}) seconds").unwrap());
-
-macro_rules! log_error {
-    ($msg:literal) => {
-        |e| {
-            error!("{}: {e:?}", $msg);
-            e
-        }
-    };
-}
 
 #[derive(Debug, Deserialize)]
 struct LatestTopics {
@@ -68,7 +58,7 @@ struct Post {
     raw: Option<String>,
 }
 
-pub async fn scrape(page: Page) -> Result<(), Error> {
+pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
     let url = page.url;
     let name = page.name;
 
@@ -98,8 +88,7 @@ pub async fn scrape(page: Page) -> Result<(), Error> {
 
             let post_id = topic
                 .post_stream
-                .ok_or(Error::None)
-                .map_err(log_error!("`post_stream` empty"))?
+                .ok_or(anyhow::anyhow!("`post_stream` empty"))?
                 .posts[0]
                 .id;
 
@@ -110,10 +99,7 @@ pub async fn scrape(page: Page) -> Result<(), Error> {
                 created: topic.created_at,
                 username: post.username,
                 body_cooked: post.cooked,
-                body_raw: post
-                    .raw
-                    .ok_or(Error::None)
-                    .map_err(log_error!("`post.raw` field empty"))?,
+                body_raw: post.raw.ok_or(anyhow::anyhow!("`post.raw` field empty"))?,
             };
 
             questions.push(q);
@@ -130,7 +116,7 @@ pub async fn scrape(page: Page) -> Result<(), Error> {
     Ok(())
 }
 
-async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error> {
+async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, anyhow::Error> {
     loop {
         let response = client.get(url).send().await?;
 
@@ -141,11 +127,9 @@ async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error
         if status.as_u16() == 429 {
             let seconds: u64 = WAIT_SECONDS
                 .captures(&body)
-                .ok_or(Error::None)
-                .map_err(log_error!("no capture found"))?
+                .ok_or(anyhow::anyhow!("no capture found"))?
                 .name("s")
-                .ok_or(Error::None)
-                .map_err(log_error!("no capture name `s` found"))?
+                .ok_or(anyhow::anyhow!("no capture name `s` found"))?
                 .as_str()
                 .parse()?;
 
@@ -160,7 +144,7 @@ async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error
     }
 }
 
-fn create_temp_file(name: &str, page: u64, questions: &[Question]) -> Result<(), Error> {
+fn create_temp_file(name: &str, page: u64, questions: &[Question]) -> Result<(), anyhow::Error> {
     let mut w = Writer::from_path(format!("scrape/{name}-{page}.csv"))?;
 
     for q in questions {
@@ -172,7 +156,7 @@ fn create_temp_file(name: &str, page: u64, questions: &[Question]) -> Result<(),
     Ok(())
 }
 
-fn combine_temp_files(name: &str) -> Result<(), Error> {
+fn combine_temp_files(name: &str) -> Result<(), anyhow::Error> {
     let mut page = 0;
     let mut questions = Vec::new();
 
@@ -204,7 +188,7 @@ fn combine_temp_files(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn delete_temp_files(name: &str) -> Result<(), Error> {
+fn delete_temp_files(name: &str) -> Result<(), anyhow::Error> {
     let mut page = 0;
 
     loop {

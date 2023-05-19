@@ -3,11 +3,9 @@ use clap::{builder::ValueParser, Parser, Subcommand};
 use std::str::FromStr;
 
 mod cmd;
-mod error;
 mod question;
 
 use cmd::scrape::Page;
-use error::Error;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -39,11 +37,11 @@ enum UtilCommand {
 #[derive(Subcommand)]
 enum SoUtilCommand {
     Filter,
-    AccessToken,
+    Auth,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
@@ -60,12 +58,11 @@ async fn main() -> Result<(), Error> {
             cmd::util::so::filter::create().await?;
         }
         Command::Util {
-            command:
-                UtilCommand::So {
-                    command: SoUtilCommand::AccessToken,
-                },
+            command: UtilCommand::So {
+                command: SoUtilCommand::Auth,
+            },
         } => {
-            todo!();
+            cmd::util::so::auth::auth().await?;
         }
     }
 
