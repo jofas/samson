@@ -1,5 +1,3 @@
-use samson::{Error, Question};
-
 use serde::{de::DeserializeOwned, Deserialize};
 
 use chrono::offset::Utc;
@@ -8,8 +6,6 @@ use chrono::DateTime;
 use csv::{Reader, Writer};
 
 use reqwest::Client;
-
-use futures::stream::{FuturesUnordered, StreamExt};
 
 use tracing::{error, info};
 
@@ -20,10 +16,14 @@ use regex::Regex;
 
 use once_cell::sync::Lazy;
 
-use std::fmt::Display;
-use std::fs::{create_dir_all, remove_file};
+use std::fs::remove_file;
 use std::path::Path;
 use std::time::Duration;
+
+use crate::error::Error;
+use crate::question::Question;
+
+use super::Page;
 
 static WAIT_SECONDS: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"Please retry again in (?P<s>\d{1,2}) seconds").unwrap());
@@ -68,38 +68,9 @@ struct Post {
     raw: Option<String>,
 }
 
-async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error> {
-    loop {
-        let response = client.get(url).send().await?;
-
-        let status = response.status();
-
-        let body = response.text().await?;
-
-        if status.as_u16() == 429 {
-            let seconds: u64 = WAIT_SECONDS
-                .captures(&body)
-                .ok_or(Error::None)
-                .map_err(log_error!("no capture found"))?
-                .name("s")
-                .ok_or(Error::None)
-                .map_err(log_error!("no capture name `s` found"))?
-                .as_str()
-                .parse()?;
-
-            info!("sleeping for {seconds} seconds");
-
-            sleep(Duration::from_secs(seconds)).await;
-
-            continue;
-        }
-
-        return Ok(serde_json::from_str(&body)?);
-    }
-}
-
-async fn scrape<N: Display + Clone + Send + 'static>(name: N, url: &str) -> Result<(), Error> {
-    create_dir_all("scrape/")?;
+pub async fn scrape(page: Page) -> Result<(), Error> {
+    let url = page.url;
+    let name = page.name;
 
     let client = Client::new();
 
@@ -149,17 +120,47 @@ async fn scrape<N: Display + Clone + Send + 'static>(name: N, url: &str) -> Resu
         }
 
         let name = name.clone();
-        spawn_blocking(move || create_temp_file(name, page, &questions)).await??;
+        spawn_blocking(move || create_temp_file(&name, page, &questions)).await??;
 
         page += 1;
     }
 
-    spawn_blocking(move || combine_temp_files(name)).await??;
+    spawn_blocking(move || combine_temp_files(&name)).await??;
 
     Ok(())
 }
 
-fn create_temp_file<N: Display>(name: N, page: u64, questions: &[Question]) -> Result<(), Error> {
+async fn get<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Error> {
+    loop {
+        let response = client.get(url).send().await?;
+
+        let status = response.status();
+
+        let body = response.text().await?;
+
+        if status.as_u16() == 429 {
+            let seconds: u64 = WAIT_SECONDS
+                .captures(&body)
+                .ok_or(Error::None)
+                .map_err(log_error!("no capture found"))?
+                .name("s")
+                .ok_or(Error::None)
+                .map_err(log_error!("no capture name `s` found"))?
+                .as_str()
+                .parse()?;
+
+            info!("sleeping for {seconds} seconds");
+
+            sleep(Duration::from_secs(seconds)).await;
+
+            continue;
+        }
+
+        return Ok(serde_json::from_str(&body)?);
+    }
+}
+
+fn create_temp_file(name: &str, page: u64, questions: &[Question]) -> Result<(), Error> {
     let mut w = Writer::from_path(format!("scrape/{name}-{page}.csv"))?;
 
     for q in questions {
@@ -171,7 +172,7 @@ fn create_temp_file<N: Display>(name: N, page: u64, questions: &[Question]) -> R
     Ok(())
 }
 
-fn combine_temp_files<N: Display>(name: N) -> Result<(), Error> {
+fn combine_temp_files(name: &str) -> Result<(), Error> {
     let mut page = 0;
     let mut questions = Vec::new();
 
@@ -203,7 +204,7 @@ fn combine_temp_files<N: Display>(name: N) -> Result<(), Error> {
     Ok(())
 }
 
-fn delete_temp_files<N: Display>(name: N) -> Result<(), Error> {
+fn delete_temp_files(name: &str) -> Result<(), Error> {
     let mut page = 0;
 
     loop {
@@ -217,26 +218,6 @@ fn delete_temp_files<N: Display>(name: N) -> Result<(), Error> {
         remove_file(path)?;
 
         page += 1;
-    }
-
-    Ok(())
-}
-
-/// Created in `src/bin/util.rs`
-///
-const SO_FILTER: &str = "!GA6rnU)jp95BuY0.ZNgu2js9EcJVQ";
-
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    tracing_subscriber::fmt::init();
-
-    let u = "https://users.rust-lang.org";
-    let i = "https://internals.rust-lang.org";
-
-    let mut requests = FuturesUnordered::from_iter([scrape("urlo", u), scrape("irlo", i)]);
-
-    while let Some(r) = requests.next().await {
-        r?;
     }
 
     Ok(())
