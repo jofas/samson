@@ -84,7 +84,9 @@ pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
         for (i, topic) in topics.into_iter().enumerate() {
             info!(forum = url, page = page, topic = i);
 
-            let topic: Topic = get(&client, &format!("{}/t/{}.json", url, topic.id)).await?;
+            let topic_url = format!("{}/t/{}", url, topic.id);
+
+            let topic: Topic = get(&client, &format!("{topic_url}.json")).await?;
 
             let post_id = topic
                 .post_stream
@@ -100,6 +102,7 @@ pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
                 username: post.username,
                 body_cooked: post.cooked,
                 body_raw: post.raw.ok_or(anyhow::anyhow!("`post.raw` field empty"))?,
+                url: topic_url,
             };
 
             questions.push(q);
