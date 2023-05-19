@@ -1,5 +1,3 @@
-use crate::error::Error;
-
 use futures::stream::{FuturesUnordered, TryStreamExt};
 
 use std::fs::create_dir_all;
@@ -7,7 +5,7 @@ use std::str::FromStr;
 
 mod discourse;
 
-pub async fn scrape(pages: Vec<Page>) -> Result<(), Error> {
+pub async fn scrape(pages: Vec<Page>) -> Result<(), anyhow::Error> {
     create_dir_all("scrape/")?;
 
     pages
@@ -28,12 +26,12 @@ pub struct Page {
 }
 
 impl FromStr for Page {
-    type Err = Error;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let &[name, url, ty] = s.split(';').collect::<Vec<&str>>().as_slice() else {
             return Err(
-                Error::Custom(
+                anyhow::anyhow!(
                     "expected page to have three parts separated by `;`".to_owned(),
                 ),
             );
@@ -53,12 +51,12 @@ pub enum PageType {
 }
 
 impl FromStr for PageType {
-    type Err = Error;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "discourse" => Ok(Self::Discourse),
-            _ => Err(Error::Custom(format!("unknown variant `{s}`"))),
+            _ => Err(anyhow::anyhow!(format!("unknown variant `{s}`"))),
         }
     }
 }

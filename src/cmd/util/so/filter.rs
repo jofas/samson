@@ -1,5 +1,3 @@
-use crate::error::Error;
-
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use reqwest::Client;
@@ -64,7 +62,7 @@ enum FilterType {
     Invalid,
 }
 
-pub async fn create() -> Result<(), Error> {
+pub async fn create() -> Result<(), anyhow::Error> {
     let client = Client::new();
 
     let url = "https://api.stackexchange.com/2.3/filters/create";
