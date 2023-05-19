@@ -10,4 +10,5 @@ pub struct Question {
     pub body_cooked: String,
     pub created: DateTime<Utc>,
     pub username: String,
+    pub url: String,
 }
