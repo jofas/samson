@@ -103,6 +103,7 @@ pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
                 body_cooked: post.cooked,
                 body_raw: post.raw.ok_or(anyhow::anyhow!("`post.raw` field empty"))?,
                 url: topic_url,
+                source_id: topic.id.to_string(),
             };
 
             questions.push(q);

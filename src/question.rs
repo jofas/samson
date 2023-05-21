@@ -11,4 +11,5 @@ pub struct Question {
     pub created: DateTime<Utc>,
     pub username: String,
     pub url: String,
+    pub source_id: String,
 }
