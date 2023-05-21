@@ -181,7 +181,7 @@ fn combine_temp_files(name: &str) -> Result<(), anyhow::Error> {
 
     let mut w = Writer::from_path(format!("scrape/{name}.csv"))?;
 
-    for q in questions {
+    for q in questions.into_iter().rev() {
         w.serialize(q)?;
     }
 
