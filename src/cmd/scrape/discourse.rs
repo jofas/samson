@@ -113,8 +113,6 @@ pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
         spawn_blocking(move || create_temp_file(&name, page, &questions)).await??;
 
         page += 1;
-
-        break;
     }
 
     spawn_blocking(move || combine_temp_files(&name)).await??;
