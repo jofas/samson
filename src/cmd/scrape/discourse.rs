@@ -113,6 +113,8 @@ pub async fn scrape(page: Page) -> Result<(), anyhow::Error> {
         spawn_blocking(move || create_temp_file(&name, page, &questions)).await??;
 
         page += 1;
+
+        break;
     }
 
     spawn_blocking(move || combine_temp_files(&name)).await??;
@@ -162,7 +164,7 @@ fn create_temp_file(name: &str, page: u64, questions: &[Question]) -> Result<(),
 
 fn combine_temp_files(name: &str) -> Result<(), anyhow::Error> {
     let mut page = 0;
-    let mut questions = Vec::new();
+    let mut questions: Vec<Question> = Vec::new();
 
     loop {
         let path = format!("scrape/{name}-{page}.csv");
