@@ -196,7 +196,7 @@ fn delete_temp_files(name: &str) -> Result<(), anyhow::Error> {
     let mut page = 0;
 
     loop {
-        let path = format!("scrape/{name}-{page}.json");
+        let path = format!("scrape/{name}-{page}.csv");
         let path = Path::new(&path);
 
         if !path.exists() {
